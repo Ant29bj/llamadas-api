@@ -1,0 +1,12 @@
+version: "3.1"
+services:
+  db:
+    image: mariadb
+    restart: no
+    environment:
+      MYSQL_ROOT_DATABASE: llamadas
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_USER: root
+      MYSQL_PASSWORD: root
+    ports:
+      - 3306:3306
