@@ -21,5 +21,9 @@ func main() {
 	r.HandleFunc("/llamadas", filtros.GetLlamadasPorDisposition).Methods("POST")
 	r.HandleFunc("/llamadas/fecha", filtros.GetLlamadasPorRangoFecha).Methods("POST")
 	r.HandleFunc("/llamadas/src", filtros.GetLlamadasPorSrc).Methods("GET")
+	r.HandleFunc("/llamadas/clid", filtros.GetAllClid).Methods("GET")
+	r.HandleFunc("/llamadas/clid/filtro", filtros.BuscarPorClid).Methods("POST")
+	r.HandleFunc("/llamadas/dst", filtros.GetLlamadasPorDst).Methods("GET")
+
 	http.ListenAndServe(":8080", handlerCros)
 }

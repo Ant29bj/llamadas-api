@@ -518,3 +518,309 @@ func GetLlamadasPorSrc(w http.ResponseWriter, r *http.Request) {
 	// Enviar la respuesta JSON
 	w.Write(jsonResponse)
 }
+
+func GetLlamadasPorDst(w http.ResponseWriter, r *http.Request) {
+	// Obtener los parámetros de paginación y filtro de la consulta
+	pageStr := r.URL.Query().Get("page")
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	pageSizeStr := r.URL.Query().Get("page_size")
+	pageSize, err := strconv.Atoi(pageSizeStr)
+	if err != nil || pageSize < 1 {
+		pageSize = 10
+	}
+
+	dstFilter := r.URL.Query().Get("dst")
+
+	// Calcular el offset en función de la página y el tamaño de la página
+	offset := (page - 1) * pageSize
+
+	// Abrir la conexión a la base de datos
+	db, err := sql.Open("mysql", "root:root@tcp(localhost:3306)/llamadas")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	// Construir la consulta SQL con el filtro
+	query := "SELECT * FROM cdr"
+	args := make([]interface{}, 0)
+
+	if dstFilter != "" {
+		query += " WHERE dst = ?"
+		args = append(args, dstFilter)
+	}
+
+	query += " ORDER BY calldate DESC LIMIT ?, ?"
+	args = append(args, offset, pageSize)
+
+	// Realizar la consulta paginada con filtro
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	// Leer los resultados y almacenarlos en una lista de CDRs
+	cdrs := make([]modelos.CDR, 0)
+	for rows.Next() {
+		var cdr modelos.CDR
+		err := rows.Scan(
+			&cdr.CallDate,
+			&cdr.Clid,
+			&cdr.Src,
+			&cdr.Dst,
+			&cdr.Dcontext,
+			&cdr.Channel,
+			&cdr.DstChannel,
+			&cdr.LastApp,
+			&cdr.LastData,
+			&cdr.Duration,
+			&cdr.Billsec,
+			&cdr.Disposition,
+			&cdr.Amaflags,
+			&cdr.Accountcode,
+			&cdr.UniqueID,
+			&cdr.UserField,
+			&cdr.Did,
+			&cdr.RecordingFile,
+			&cdr.Cnum,
+			&cdr.Cnam,
+			&cdr.OutboundCnum,
+			&cdr.OutboundCnam,
+			&cdr.DstCnam,
+			&cdr.LinkedID,
+			&cdr.PeerAccount,
+			&cdr.Sequence,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cdrs = append(cdrs, cdr)
+	}
+	if err = rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	// Obtener el total de registros en la tabla (con el filtro aplicado)
+	var totalRecords int
+	if dstFilter != "" {
+		err = db.QueryRow("SELECT COUNT(*) FROM cdr WHERE dst = ?", dstFilter).Scan(&totalRecords)
+	} else {
+		err = db.QueryRow("SELECT COUNT(*) FROM cdr").Scan(&totalRecords)
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	totalPages := totalRecords / pageSize
+	if totalPages%pageSize != 0 {
+		totalPages++
+	}
+
+	// Crear una estructura para la respuesta paginada
+	type PaginatedResponse struct {
+		TotalRecords int           `json:"total_records"`
+		Page         int           `json:"page"`
+		TotalPages   int           `json:"total_pages"`
+		PageSize     int           `json:"page_size"`
+		Records      []modelos.CDR `json:"records"`
+	}
+
+	// Construir la respuesta paginada
+	response := PaginatedResponse{
+		TotalRecords: totalRecords,
+		Page:         page,
+		TotalPages:   totalPages,
+		PageSize:     pageSize,
+		Records:      cdrs,
+	}
+
+	// Convertir la respuesta a JSON
+	jsonResponse, err := json.Marshal(response)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Establecer las cabeceras de la respuesta HTTP
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Enviar la respuesta JSON
+	w.Write(jsonResponse)
+}
+
+func GetAllClid(w http.ResponseWriter, r *http.Request) {
+	db, err := sql.Open("mysql", "root:root@tcp(localhost:3306)/llamadas")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	// Realizar la consulta para obtener los valores de Clid
+	rows, err := db.Query("SELECT DISTINCT Clid FROM cdr")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	// Almacenar los valores de Clid en una lista sin repeticiones
+	var clidList []string
+	for rows.Next() {
+		var clid string
+		err := rows.Scan(&clid)
+		if err != nil {
+			log.Fatal(err)
+		}
+		clidList = append(clidList, clid)
+	}
+	if err = rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	// Convertir la lista de Clid a JSON
+	jsonResponse, err := json.Marshal(clidList)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Establecer las cabeceras de la respuesta HTTP
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Enviar la respuesta JSON
+	w.Write(jsonResponse)
+}
+
+func BuscarPorClid(w http.ResponseWriter, r *http.Request) {
+	// Leer el parámetro clid del cuerpo de la solicitud
+	type RequestBody struct {
+		Clid string `json:"clid"`
+	}
+
+	var requestBody RequestBody
+	err := json.NewDecoder(r.Body).Decode(&requestBody)
+	if err != nil {
+		http.Error(w, "Error al leer el cuerpo de la solicitud", http.StatusBadRequest)
+		return
+	}
+
+	// Obtener los parámetros de paginación de la consulta
+	pageStr := r.URL.Query().Get("page")
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	pageSizeStr := r.URL.Query().Get("page_size")
+	pageSize, err := strconv.Atoi(pageSizeStr)
+	if err != nil || pageSize < 1 {
+		pageSize = 10
+	}
+
+	// Calcular el offset en función de la página y el tamaño de la página
+	offset := (page - 1) * pageSize
+
+	// Abrir la conexión a la base de datos
+	db, err := sql.Open("mysql", "root:root@tcp(localhost:3306)/llamadas")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	// Construir la consulta SQL con el filtro por clid
+	query := "SELECT * FROM cdr WHERE clid = ? ORDER BY calldate DESC LIMIT ?, ?"
+
+	// Realizar la consulta paginada con el filtro por clid
+	rows, err := db.Query(query, requestBody.Clid, offset, pageSize)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	// Leer los resultados y almacenarlos en una lista de CDRs
+	cdrs := make([]modelos.CDR, 0)
+	for rows.Next() {
+		var cdr modelos.CDR
+		err := rows.Scan(
+			&cdr.CallDate,
+			&cdr.Clid,
+			&cdr.Src,
+			&cdr.Dst,
+			&cdr.Dcontext,
+			&cdr.Channel,
+			&cdr.DstChannel,
+			&cdr.LastApp,
+			&cdr.LastData,
+			&cdr.Duration,
+			&cdr.Billsec,
+			&cdr.Disposition,
+			&cdr.Amaflags,
+			&cdr.Accountcode,
+			&cdr.UniqueID,
+			&cdr.UserField,
+			&cdr.Did,
+			&cdr.RecordingFile,
+			&cdr.Cnum,
+			&cdr.Cnam,
+			&cdr.OutboundCnum,
+			&cdr.OutboundCnam,
+			&cdr.DstCnam,
+			&cdr.LinkedID,
+			&cdr.PeerAccount,
+			&cdr.Sequence,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cdrs = append(cdrs, cdr)
+	}
+	if err = rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	// Obtener el total de registros en la tabla con el filtro por clid
+	var totalRecords int
+	err = db.QueryRow("SELECT COUNT(*) FROM cdr WHERE clid = ?", requestBody.Clid).Scan(&totalRecords)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	totalPages := totalRecords / pageSize
+	if totalPages%pageSize != 0 {
+		totalPages++
+	}
+
+	// Crear una estructura para la respuesta paginada
+	type PaginatedResponse struct {
+		TotalRecords int           `json:"total_records"`
+		Page         int           `json:"page"`
+		TotalPages   int           `json:"total_pages"`
+		PageSize     int           `json:"page_size"`
+		Records      []modelos.CDR `json:"records"`
+	}
+
+	// Construir la respuesta paginada
+	response := PaginatedResponse{
+		TotalRecords: totalRecords,
+		Page:         page,
+		TotalPages:   totalPages,
+		PageSize:     pageSize,
+		Records:      cdrs,
+	}
+
+	// Convertir la respuesta a JSON
+	jsonResponse, err := json.Marshal(response)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Establecer las cabeceras de la respuesta HTTP
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Enviar la respuesta JSON
+	w.Write(jsonResponse)
+}
